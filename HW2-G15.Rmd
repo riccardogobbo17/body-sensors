@@ -1,0 +1,559 @@
+---
+title: "Homework_2"
+author: "Adriano Fragomeni, Ufuk Caliskan, Riccardo Gobbo"
+date: "1 June 2018"
+output: html_document
+---
+```{r}
+library(dplyr)
+library(plotly)
+library(MASS)
+library(e1071)
+library(igraph)
+library(xgboost) 
+library(archdata) 
+library(caret) 
+library(Ckmeans.1d.dp) 
+library(magrittr)
+```
+
+*Part 1*
+
+Let $C$ represents the classification variable and $c$ be the value of $C$; let us consider just two classes $\{-,+\}$.
+According to the bayes rule, the probability of a sample $\mathbf{X}=(x_1,x_2,....,x_n)$ being class c is:
+$$p(c|\mathbf{X})=\frac{p(\mathbf{X}|c)p(c)}{p(E)}$$
+$\mathbf{X}$ is classified as the class $C=-$, if and only if
+$$f_b(\mathbf{X})=\frac{p(C=+|\mathbf{X})}{p(C=-|\mathbf{X})}\leq1$$ where $f_b(\mathbf{X})$ is called a Bayesian classifier.
+The Naive Bayesian is a particular Bayesian classifier which simplifies learning by assuming that the features are independent given the class $$P(\mathbf{x},c)=\prod_{i=1}^nP(x_i|c)$$ where $\mathbf{x}=(x_1,x_2,..,x_n)$ is a feature vector and $c$ is the class.
+One surprising aspect of this classifier is that it outperforms many other sophisticated methods, despite its assumption of conditional independece, which is rarely found in real situations. 
+
+One explanation of this behaviour was given by Domingos and Pazzani (1997); they thought that although the Bayesian classifier's
+probability estimates are  optimal under quadratic loss if the independence assumption holds, the classifier can be optimal under
+zero-one loss (misclassification rate) even when this assumption is violated. The zero-one loss does not penalize the probability
+estimation as long as the maximum probability is assigned to the correct class, so this classifier may change the posterior
+probabilities of each class apart from the class with the maximum (posterior) probability.
+They also showed that the region of quadratic-loss optimality of the Bayesian classifier is a second-order infinitesimal fraction of the
+region of zero-one optimality, implying that this classifier is an optimal learner and it can be applied in different situations.
+For example, the true probabilities $p(+|E)=0.9$ and $p(-|E)=0.1$ and the probability estimates $\hat{p}(+|E)=0.6$ and
+$\hat{p}(-|E)=0.4$ are produced by Naive Bayes classifier. Obviously, the probability estimates are poor, but the classification (positive) is not
+affected. 
+
+Another researcher Zhang (2004) thought that the explanation given by Domingos and Pazzani was not sufficient to explain why the
+dependencies among attributes do not make the classification less accurate.
+The author provides an explanation of the behaviour of this classifier concerning the dependencies among attributes: when they work together, when they cancel each other and do not affect the classification.
+Zhang uses a DAG (directed acyclic graph) to explicitly represent the dependencies among attributes, where the class node is directly linked with the features
+nodes and there are also links between features nodes (ANB, Augmented Naive Bayes) as follows:
+
+```{r}
+edges <- c(1,2,1,3,1,4,1,5,4,5,2,3,4,3)
+g<-graph(edges, n=max(edges), directed=TRUE)
+plot(g)
+```
+
+This graph represents the following joint probability distribution
+$$p_G(x_1,...,x_n,c) = P(c)\prod_{i=1}^{n} P(x_i\mid pa(x_i),c)$$
+
+where $pa(x_i)$ denotes the parents of the node $x_i$ in the graph, and $c$ is the root (class) node.
+Given just two classes $\{-,+\}$, for a node $x$ its local dependence can be measured as the ratio between the conditional probability of the node given its parents and the root, over the conditional probability of the node conditioned on the class node:
+
+$$dd_G^+(x\mid pa(x))=\frac{p(x\mid pa(x), +)}{p(x\mid +)}$$
+$$dd_G^-(x\mid pa(x))=\frac{p(x\mid pa(x), -)}{p(x\mid -)}$$
+
+Taking the ratio one can quantify the influence of $X's$ local dependence on the classification:
+$$ddr_G(x)= \frac{dd_{G}^+(x \mid pa(x))}{dd_{G}^-(x \mid pa(x))}$$
+
+there can be the following results:
+
+1) When $X$ has no parent $ddr_G(x)=1$, because $dd_G^+=dd_G^-=1$ .
+
+2) When the local dependencies in both classes support different classifications, they partially cancel each other out, and the final
+classification will be the class with the greatest local dependence. This shows that the ratio of the local dependencies ultimately
+determines which classification the local dependence of a node supports.
+
+Given an ANB graph and its correspondent naive Bayes $G_{nb}$ (removing all arcs between features in the ANB graph), it is true that
+$$f_b(x_1, x_2, ...,x_n)=f_{nb}(x_1, x_2, ..., x_n) \cdot \prod_{i=1}^n ddr_G(x_i)$$
+
+where $f_b$ and $f_{nb}$ are the Bayesian and Naive Bayesian classifiers respectively, and $\displaystyle \prod_{i=1}^n ddr_G(x_i)$ is the
+dependence distribution factor.
+Under Zero-One Loss, $f_b(x_1, x_2, ..., x_n)=f_{nb}(x_1, x_2, ..., x_n)$ if and only if $f_b(x_1, x_2, ...,x_n) \ge 1$ and
+$\displaystyle \prod_{i=1}^n ddr_G(x_i) \le f_b(x_1, x_2, ...,x_n)$, or when $f_b(x_1, x_2, ..., x_n) < 1$, $\displaystyle\prod_{i=1}^nddr_G(x_i) > f_b(x_1, x_2, ..., x_n)$.
+
+References:
+
+1)Domingos, P., and Pazzani, M. 1997. Beyond independence: Conditions for the optimality of the simple Bayesian classifier. [online] Available at: https://www.ics.uci.edu/~pazzani/Publications/MLJ97.pdf
+
+2)Zhang, H. 2004. The Optimality of Naive Bayes. American Association for Artificial Intelligence. [online] Available at: http://www.cs.unb.ca/~hzhang/publications/FLAIRS04ZhangH.pdf
+
+*Part 2*
+
+The main goal of this part is to analyze a dataset with only two outcomes and try to implement two different binary classification models, the LDA classifier and the Naive Bayes classifier.
+
+```{r}
+load('daily-sport.RData')
+```
+
+Take a look at data
+
+```{r}
+# Information about dataset
+str(dailysport)
+summary(dailysport)
+```
+
+In this dataset there are 30000 observations of 46 variables, where 45 over to 46 of them are data taken by 9 different sensors (x,y,z
+accelerometers, x,y,z gyroscopes, x,y,z magnetometers) arranged on torso (T), right arm (RA), left arm (LA), right leg (RL), left leg
+(LL) of one person who did 4 different activities (walking, stepper, cross trainer, jumping), this is the 46th variable, which is a
+factor variable and it allows us to identify these 4 activities (7500 variables per activity).
+
+Check if there are some NA values in our dataset
+
+```{r}
+sum(is.na(dailysport))
+```
+
+There are not NA values so it is not necessary to deal with them.
+
+The main goal is to distinguish these human activities using the data above. 
+
+Firstly we are going to reduce the dimension of our dataset, taking into account just 2 activities (jumping and walking) and only 3 sensors on just one location (x,y,z accelerometers on Torso (T)).
+
+```{r}
+#small dataset
+ds.small<-dailysport %>% subset(id=='walking' | id=='jumping',select=c('id','T-xAcc','T-yAcc','T-zAcc'))%>%droplevels()
+colnames(ds.small)<-c('id','T_xAcc','T_yAcc','T_zAcc')
+```
+
+Take a look at the main properties of these three components for the two different classes
+
+```{r}
+summary(ds.small %>% subset(id=='walking')%>%droplevels())
+summary(ds.small %>% subset(id=='jumping')%>%droplevels())
+```
+
+One can see in the considered dataset:
+
+1) For the walking class the 'T_yAcc' and the 'T_zAcc' are features which have the same median and mean, whereas the 'T_xAcc' has different values for them.
+
+2) For the jumping class the 'T_xAcc' and the 'T_zAcc' are features which have different values for the median and mean, whereas the 'T_yAcc' has the same values for them.
+
+Take a look at this point, treating them as a 3D point cloud in the Euclidean space, to plot them we are going to consider just 1000 random points.
+
+
+```{r}
+set.seed(123)
+# sample 1000 points from our dataset
+points<-ds.small[sample(nrow(ds.small),1000),]
+
+# 3D scatterplot
+plot_ly(points, x = ~T_xAcc, y = ~T_yAcc, z = ~T_zAcc,color=~id,colors = c('green', 'purple'),marker=list(size=4)) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'x'),
+                     yaxis = list(title = 'y'),
+                     zaxis = list(title = 'z')))
+```
+
+The plot shows that there is a big concentration of points for both classes around the origin, whereas looking at the graph around an $x=50$ the points of jumping class are more scattered, so the points of walking class are concentrated around the origin forming one cluster which is inside the cluster formed by the points of the jumping class; one can guess that there is no linear classifier that builds a plane in the euclidean space which divides the two clusters perfectly: it means that whatever linear classifier will be used, it will not work well, how it is shown from the following analysis.
+Firstly data are splitted in train-set and test-set taking 70% and 30% of them respectively.
+
+```{r}
+## 70% of the sample size
+samp_size <- floor(0.70 * nrow(ds.small))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(ds.small)), size = samp_size)
+
+ds.train <- ds.small[train_ind, ]
+ds.test <- ds.small[-train_ind, ]
+```
+
+Given them we may proceed to estimate:
+
+1) $f_1(.)$ from the $\mathbf{X_i}$ for which $Y_i=1$, obtaining $\hat{f_1}(.)$
+
+2) $f_0(.)$ from the $\mathbf{X_i}$ for which $Y_0=0$, obtaining $\hat{f_0}(.)$
+
+3) the subpopulation proportion $\pi_1$ whith $\hat{\pi_1}$ with $\hat{\pi_1}=\sum_{i=1}^nY_i$
+
+4) the subpopulation proportion $\pi_0$ whith $\hat{\pi_0}$ with $\hat{\pi_0}=\sum_{i=1}^nY_i$
+
+and define
+
+$$\hat{r}(\mathbf{x})=\frac{\hat{\pi_1}\hat{f_1}(x)}{\hat{\pi_1}\hat{f_1}(x)+\hat{\pi_0}\hat{f_0}(x)}\to\hat{\eta}(\mathbf{x})=\begin{cases}
+    1       & \quad \text{if } \hat{r}(\mathbf{x})>\frac{1}{2}\\
+    0  & \quad \text{ otherwise}
+  \end{cases}$$
+
+The simplest approach consists in assuming a parametric model for the class conditional densities $f_1(.)$ and $f_0(.)$, so we are going to use the LDA model.
+
+*Linear discriminant analysis*
+
+The main assumptions are:
+
+1) The conditional probability density functions $p(\mathbf{x}|y=0)$ and $p(\mathbf{x}|y=1)$ are both normally distributed
+
+2) The class covariances are identical (homoscedasticity assumption)
+
+```{r}
+# LDA
+lda.out<-lda(id ~ .,data=ds.train)
+```
+
+After using LDA model, we are able to predict the class-labels on the training set and on the test set
+
+```{r}
+# Prediction on the train set
+pred.tr = predict(lda.out, ds.train[,-1])$class
+
+# Prediction on the test set
+pred.te = predict(lda.out, ds.test[,-1])$class
+```
+
+After creating the confusion matrix we can evaluate the performance of the model on the train set and on the test set, calculating the empirical error rate, which is defined as $$\hat{L_n}(\eta)=\frac{1}{n}\sum_{i=1}^nI(\eta(\mathbf{X_i})\neq Y_i)$$
+
+```{r}
+# Empirical error rate train set
+table(pred.tr , ds.train$id)
+mean(pred.tr != ds.train$id)
+
+# Empirical error rate test set
+table(pred.te , ds.test$id)
+mean(pred.te != ds.test$id)
+```
+
+As we can see the results are very similiar. One can assume that either the model is underfitted, because we have high values for the train and for the test,  or the train set and the test set are based on similar points, how it is possible to see on the plot where points are very close to each other, in particular around the origin.
+
+*Naive Bayes Classifier*
+
+Let us try to use a Naive Bayes Classifier, assuming that, conditionally on the class label, the feature vector $\mathbf{X}$ has
+independent components, so $$f_1(x)=\prod_{j=1}^{d}f_{1,j}(x_j) \quad\ and \quad\ f_0(x)=\prod_{j=1}^{d}f_{0,j}(x_j)$$
+Now we are going to apply the naive Bayes classifier to implement a classification model using the naiveBayes() function implemented in R,
+where each feature is assumed to follow a Gaussian distribution. 
+The same train set and test set are used
+
+```{r}
+naive.Bayes.out<-naiveBayes(id ~ .,data=ds.train, type = "raw")
+```
+
+After using Naive Bayes model, we are able to predict the class-labels on the training set and on the test set
+
+```{r}
+# Prediction on the train set
+pred.tr = predict(naive.Bayes.out, ds.train[,-1])
+# Prediction on the test set
+pred.te = predict(naive.Bayes.out, ds.test[,-1])
+
+```
+
+and evaluate the model using the empirical error rate
+
+```{r}
+# Empirical error rate train set
+table(pred.tr , ds.train$id)
+mean(pred.tr != ds.train$id)
+
+# Empirical error rate test set
+table(pred.te , ds.test$id)
+mean(pred.te != ds.test$id)
+```
+
+The calculated error rate in the train set and test set are almost the same but the predictions are more accurate than the LDA's.
+Indeed 33% of the predictions the LDA classifier makes are wrong whereas the Naive Bayes classifier is just in 4% of the predictions wrong.
+
+We are going to plot the estimated distributions with the gaussian kernel to see if there are significant differences in the two
+activities for each variable.
+For each distribution mentioned above we used the bootstrap method to estimate the 95% confidence interval, implemented as follows:
+
+1) we sampled from our features with replacements
+
+2) we calculated the density using a gaussian kernel per each iteration
+
+3) we calculated the quantile function on the bootstrap vector to have the CI
+
+```{r}
+boot.funct<-function(df,class,param,dens){
+  subdf<-subset(df,id==class)[,param]
+  fit2 <- replicate(1000,{ 
+    x <- sample(subdf, replace=TRUE)    
+        density(x,kernel='gaussian',from=min(dens$x),to=max(dens$x))$y})
+  fit3 <- apply(fit2, 1, quantile, c(0.025,0.975) )
+  return(fit3)
+}
+
+# Density
+wx<-density(subset(ds.small,id=='walking')$T_xAcc,kernel = 'gaussian')
+jx<-density(subset(ds.small,id=='jumping')$T_xAcc,kernel = 'gaussian')
+final_x=as.data.frame(cbind(wx$x,wx$y,jx$x,jx$y))
+colnames(final_x)<-c('walk_x','walk_densx','jump_x','jump_densx')
+
+#Bootstrap starts T_xAcc walking
+fitwalk_xCI<-boot.funct(ds.small,'walking','T_xAcc',wx)
+
+#Bootstrap starts T_xAcc jumping
+fitjump_xCI<-boot.funct(ds.small,'jumping','T_xAcc',jx)
+
+layout(matrix(c(1,1,1,1,2,3,2,3), nrow = 4, ncol = 2, byrow = TRUE))
+
+plot(jx,ylim=c(0,max(max(wx$y),max(jx$y))),main = 'Kernel Density T_xAcc',xlab='x',col='red')
+lines(wx,col='blue')
+legend('topright', legend=c("Walking", "Jumping"),col=c("blue", "red"), lty=1, cex=0.8)
+
+#Plot CI Walking x
+plot(wx, ylim = range(fitwalk_xCI),main = 'CI density T_xAcc walking',xlab='x')
+polygon( c(wx$x, rev(wx$x)), c(fitwalk_xCI[1,], rev(fitwalk_xCI[2,])),col='black', border=F)
+lines(wx, col = "red", lwd = 2)
+
+#Plot CI jumping x
+plot(jx, ylim = range(fitjump_xCI),main = 'CI density T_xAcc walking',xlab='x')
+polygon( c(jx$x, rev(jx$x)), c(fitjump_xCI[1,], rev(fitjump_xCI[2,])),col='black', border=F)
+lines(jx, col = "red", lwd = 2)
+```
+
+```{r}
+# Density
+wy<-density(subset(ds.small,id=='walking')$T_yAcc,kernel = 'gaussian')
+jy<-density(subset(ds.small,id=='jumping')$T_yAcc,kernel = 'gaussian')
+final_y=as.data.frame(cbind(wy$x,wy$y,jy$x,jy$y))
+colnames(final_y)<-c('walk_y','walk_densy','jump_y','jump_densy')
+
+#Bootstrap starts T_yAcc walking
+fitwalk_yCI<-boot.funct(ds.small,'walking','T_yAcc',wy)
+
+#Bootstrap starts T_yAcc jumping
+fitjump_yCI<-boot.funct(ds.small,'jumping','T_yAcc',jy)
+
+layout(matrix(c(1,1,1,1,2,3,2,3), nrow = 4, ncol = 2, byrow = TRUE))
+
+plot(jy,ylim=c(0,max(max(wy$y),max(jy$y))),main = 'Kernel Density T_yAcc',xlab='y',col='red')
+lines(wy,col='blue')
+legend('topright', legend=c("Walking", "Jumping"),col=c("blue", "red"), lty=1, cex=0.8)
+
+#Plot CI Walking y
+plot(wy, ylim = range(fitwalk_yCI),main = 'CI density T_yAcc walking',xlab='y')
+polygon( c(wy$x, rev(wy$x)), c(fitwalk_yCI[1,], rev(fitwalk_yCI[2,])),col='black', border=F)
+lines(wy, col = "red", lwd = 2)
+
+#Plot CI jumping y
+plot(jy, ylim = range(fitjump_yCI),main = 'CI density T_yAcc walking',xlab='y')
+polygon( c(jy$x, rev(jy$x)), c(fitjump_yCI[1,], rev(fitjump_yCI[2,])),col='black', border=F)
+lines(jy, col = "red", lwd = 2)
+```
+
+```{r}
+
+wz<-density(subset(ds.small,id=='walking')$T_zAcc,kernel = 'gaussian')
+jz<-density(subset(ds.small,id=='jumping')$T_zAcc,kernel = 'gaussian')
+final_z=as.data.frame(cbind(wz$x,wz$y,jz$x,jz$y))
+colnames(final_z)<-c('walk_z','walk_densz','jump_z','jump_densz')
+
+#Bootstrap starts T_yAcc walking
+fitwalk_zCI<-boot.funct(ds.small,'walking','T_zAcc',wz)
+
+#Bootstrap starts T_yAcc jumping
+fitjump_zCI<-boot.funct(ds.small,'jumping','T_zAcc',jz)
+
+layout(matrix(c(1,1,1,1,2,3,2,3), nrow = 4, ncol = 2, byrow = TRUE))
+
+plot(jz,ylim=c(0,max(max(wz$y),max(jz$y))),main = 'Kernel Density T_zAcc',xlab='z',col='red')
+lines(wz,col='blue')
+legend('topright', legend=c("Walking", "Jumping"),col=c("blue", "red"), lty=1, cex=0.8)
+
+#Plot CI Walking z
+plot(wz, ylim = range(fitwalk_zCI),main = 'CI density T_zAcc walking',xlab='z')
+polygon( c(wz$x, rev(wz$x)), c(fitwalk_zCI[1,], rev(fitwalk_zCI[2,])),col='black', border=F)
+lines(wz, col = "red", lwd = 2)
+
+#Plot CI jumping z
+plot(jz, ylim = range(fitjump_zCI),main = 'CI density T_yAcc walking',xlab='z')
+polygon( c(jz$x, rev(jz$x)), c(fitjump_zCI[1,], rev(fitjump_zCI[2,])),col='black', border=F)
+lines(jz, col = "red", lwd = 2)
+```
+
+For the variables T_xAcc and T_zAcc the distributions of "Walking" and "Jumping" are different. In both cases the values of "Walking"
+have low varince whereas the values of "Jumping" have a larger variance, so it means that using individually these 2 variables we are
+able to distinguish the 2 classes. On the other hand, it is not the same for the variable T_yAcc, because the two curves are overlapping.
+
+*Implementation Naive Bayes*
+
+The idea is to use a kernel density instead of a multinomial distribution. The individual class-conditional densities
+$\{f_{1,j}(·)\}_j$ and $\{f_{0,j}(·)\}_j$ can each be estimated separately using 1-dimensional kernel density estimates and, since we
+assume that the variables are independent, the joint class-conditional can be calculated as follows:
+
+$$f_1(x)=\prod_{j=1}^{d}f_{1,j}(x_j) \quad\ and \quad\ f_0(x)=\prod_{j=1}^{d}f_{0,j}(x_j)$$
+
+```{r}
+#density
+density_covariate <- function (column) {
+    den <- density(column,kernel = 'gaussian')
+    funct <- approxfun(den$x, den$y)
+    return (funct)
+}
+#Naive Bayes
+Naive_Bayes <- function (newdataset, prior_one_class, prior_second_class,densw,densj) {
+    n_hat = rep(NA, nrow(newdataset))
+    for (i in 1:nrow(newdataset)){
+          row = newdataset[i,]
+          post_1 = prior_one_class * densw[[1]](row[2]) * densw[[2]](row[3]) * densw[[3]](row[4])
+          post_2 = prior_second_class * densj[[1]](row[2]) * densj[[2]](row[3]) * densj[[3]](row[4])
+          r_hat = post_1/(post_1+post_2)
+          n_hat[i]=ifelse(is.na(post_1) || r_hat < 0.5,"jumping","walking")
+    }
+    return (n_hat)
+}
+
+ds.w <- subset(ds.train, id=='walking',select = c('T_xAcc','T_yAcc','T_zAcc'))
+ds.j <- subset(ds.train, id=='jumping',select = c('T_xAcc','T_yAcc','T_zAcc'))
+
+dens.w<-sapply(ds.w,density_covariate)
+dens.j<-sapply(ds.j,density_covariate)
+
+prior_one_class <-  nrow(ds.w)/length(ds.train$id)
+prior_second_class <- nrow(ds.j)/length(ds.train$id)
+
+
+result <- Naive_Bayes (ds.test, prior_one_class, prior_second_class,dens.w,dens.j)
+result2 <- Naive_Bayes (ds.train, prior_one_class, prior_second_class,dens.w,dens.j)
+```
+
+Let us evaluate our implementation of Naive Bayes classifier and calculate the error rate:
+
+```{r}
+# Empirical error rate train set
+table(result2 , ds.train$id)
+mean(result2 != ds.train$id)
+
+# Empirical error rate test set
+table(result , ds.test$id)
+mean(result != ds.test$id)
+```
+
+The results of our implementation are better than the results of the parametric Naive Bayes method in both train and test set.
+Comparing the results of the personal classifier, one can see that with the method used before the number of True/Negative (jumping/walking) in this case is 16 and 6 respectivily
+for the train set and the test set, whereas in the model before we obtained 42 and 19.
+The precision of the classifier is higher because the approximantion of the distributions are less biased, so the error will be less than the previous case.
+
+*Part 3*
+
+Now we are going to analyze the whole dataset and try to predict all activities instead of two like above. We will use the LDA method to see if we can identify all activities with a linear classifier.
+
+```{r}
+## 70% of the sample size
+samp_size <- floor(0.70 * nrow(dailysport))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(dailysport)), size = samp_size)
+
+train <- dailysport[train_ind, ]
+test <- dailysport[-train_ind, ]
+
+# LDA
+lda.out<-lda(id ~ .,data=train)
+
+# Prediction on the test set
+pred.te = predict(lda.out, test[,-1])$class
+
+# Empirical error rate test set
+table(pred.te , test$id)
+mean(pred.te != test$id)
+```
+
+From the result we can say that the 4 groups are well seperated and so a linear classifier is enough to distinguish the 4 classes. Just to support our idea, we also try to use random forest with boosting with the package xgboost.
+
+```{r}
+ds.origin = dailysport
+
+dailysport$id <- as.numeric(dailysport$id)
+dailysport$id <- dailysport$id - 1
+dailysportM <- as.matrix((dailysport[,-1]))
+
+data_label <- dailysport[,"id"]
+dailysportXGB <- xgb.DMatrix(data = as.matrix(dailysport), label = data_label)
+
+## 70% of the sample size
+samp_size <- floor(0.70 * nrow(dailysport))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(dailysport)), size = samp_size)
+
+train <- dailysportM[train_ind, ]
+train_label  <- data_label[train_ind]
+train_matrix <- xgb.DMatrix(data = train, label = train_label)
+
+
+test <- dailysportM[-train_ind, ]
+test_label <- data_label[-train_ind]
+test_matrix <- xgb.DMatrix(data = test, label = test_label)
+
+
+n_class = length(unique(dailysport$id))
+params = list('objective' = 'multi:softprob','eval_metric' = 'merror','num_class' = n_class)
+
+nround <- 50
+cv.nfold = 5
+
+cv_model <- xgb.cv(params = params,
+                   data = train_matrix, 
+                   nrounds = nround,
+                   nfold = cv.nfold,
+                   verbose = FALSE,
+                   prediction = TRUE)
+
+OOF_prediction <- data.frame(cv_model$pred) %>% 
+  mutate(max_prob = max.col(., ties.method = "last"),label = train_label + 1)
+head(OOF_prediction)
+
+confusionMatrix(factor(OOF_prediction$max_prob),
+                factor(OOF_prediction$label),
+                mode = "everything")
+
+### test
+
+bst_model <- xgb.train(params = params,
+                       data = train_matrix,
+                       nrounds = nround)
+
+# Predict hold-out test set
+test_pred <- predict(bst_model, newdata = test_matrix)
+test_prediction <- matrix(test_pred, nrow = n_class,
+                          ncol=length(test_pred)/n_class) %>%
+  t() %>%
+  data.frame() %>%
+  mutate(label = test_label + 1,
+         max_prob = max.col(., "last"))
+# confusion matrix of test set
+confusionMatrix(factor(test_prediction$max_prob),
+                factor(test_prediction$label),
+                mode = "everything")
+
+# get the feature real names
+names <-  colnames(dailysport[,-1])
+# compute feature importance matrix
+importance_matrix = xgb.importance(feature_names = names, model = bst_model)
+gp = xgb.ggplot.importance(importance_matrix)
+print(gp) 
+```
+
+As we can see the predictions are the same. We assumed above that the points are well separeted.
+The last plot shows us the most used variables to split the data. To check our assumption above we are going to plot the first 3 variables.
+
+```{r}
+set.seed(123)
+
+#small dataset
+ds<-ds.origin %>% subset(select=c('id','LA-xMag','T-yMag','RL-zMag'))%>%droplevels()
+colnames(ds)<-c('id','LA_xMag','T_yMag','RL_zMag')
+
+# sample 1000 points from our dataset
+points<-ds[sample(nrow(ds),30000),]
+
+# 3D scatterplot
+plot_ly(points, x = ~LA_xMag, y = ~T_yMag, z = ~RL_zMag,color=~id,colors = c('green', 'purple','red','blue'),marker=list(size=4)) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'x'),
+                     yaxis = list(title = 'y'),
+                     zaxis = list(title = 'z')))
+```
+
+As we expected, the classes are well separated.
